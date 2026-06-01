@@ -505,6 +505,16 @@ a svg {
   font-weight: 900;
 }
 
+.status-pill {
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.status-pill.active {
+  border-color: currentColor;
+  box-shadow: 0 8px 18px rgba(38, 48, 43, 0.1);
+}
+
 .pill-row {
   margin-top: 10px;
 }
@@ -666,6 +676,17 @@ a svg {
   .form-grid,
   .stat-grid {
     grid-template-columns: 1fr;
+  }
+
+  .type-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .status-pill {
+    justify-content: center;
+    min-height: 48px;
+    padding: 8px;
   }
 
   .balance-hero {

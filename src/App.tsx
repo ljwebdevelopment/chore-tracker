@@ -451,9 +451,11 @@ function ChildDashboard({
 }) {
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
+  const [activeChoreType, setActiveChoreType] = useState<ChoreType>("daily");
   const chores = data.chores.filter((chore) => assignedToChild(chore, childId) && chore.active);
   const available = sortChoresByType(chores.filter((chore) => isChoreAvailable(chore, childId, data.completions)));
   const remainingByType = (type: ChoreType) => available.filter((chore) => chore.type === type);
+  const activeChores = remainingByType(activeChoreType);
   const completedThisWeek = data.completions.filter((item) => item.childId === childId && item.weekId === getWeekId());
 
   async function markComplete(chore: Chore, completionMethod: CompletionMethod) {
@@ -479,42 +481,55 @@ function ChildDashboard({
       {message && <Banner tone="info">{message}</Banner>}
 
       <div className="type-tabs">
-        <StatusPill label="Daily" value={remainingByType("daily").length} tone="daily" />
-        <StatusPill label="Weekly" value={remainingByType("weekly").length} tone="weekly" />
-        <StatusPill label="Bonus" value={remainingByType("bonus").length} tone="bonus" />
+        <StatusPill
+          label="Daily"
+          value={remainingByType("daily").length}
+          tone="daily"
+          active={activeChoreType === "daily"}
+          onClick={() => setActiveChoreType("daily")}
+        />
+        <StatusPill
+          label="Weekly"
+          value={remainingByType("weekly").length}
+          tone="weekly"
+          active={activeChoreType === "weekly"}
+          onClick={() => setActiveChoreType("weekly")}
+        />
+        <StatusPill
+          label="Bonus"
+          value={remainingByType("bonus").length}
+          tone="bonus"
+          active={activeChoreType === "bonus"}
+          onClick={() => setActiveChoreType("bonus")}
+        />
       </div>
 
-      {(["daily", "weekly", "bonus"] as ChoreType[]).map((type) => {
-        const choresByType = remainingByType(type);
-        return (
-          <ChoreSection title={`${type[0].toUpperCase()}${type.slice(1)} chores`} key={type}>
-            {choresByType.length === 0 ? (
-              <EmptyState text={`No ${type} chores left right now.`} />
-            ) : (
-              choresByType.map((chore) => (
-                <ChoreCard key={chore.id} chore={chore}>
-                  <div className="complete-actions">
-                    <button
-                      className="primary-button"
-                      disabled={busyId.startsWith(chore.id)}
-                      onClick={() => markComplete(chore, "individual")}
-                    >
-                      <CheckCircle2 aria-hidden /> {busyId === `${chore.id}-individual` ? "Saving..." : "Completed"}
-                    </button>
-                    <button
-                      className="secondary-button"
-                      disabled={busyId.startsWith(chore.id)}
-                      onClick={() => markComplete(chore, "together")}
-                    >
-                      <CheckCircle2 aria-hidden /> {busyId === `${chore.id}-together` ? "Saving..." : "Completed Together"}
-                    </button>
-                  </div>
-                </ChoreCard>
-              ))
-            )}
-          </ChoreSection>
-        );
-      })}
+      <ChoreSection title={`${activeChoreType[0].toUpperCase()}${activeChoreType.slice(1)} chores`}>
+        {activeChores.length === 0 ? (
+          <EmptyState text={`No ${activeChoreType} chores left right now.`} />
+        ) : (
+          activeChores.map((chore) => (
+            <ChoreCard key={chore.id} chore={chore}>
+              <div className="complete-actions">
+                <button
+                  className="primary-button"
+                  disabled={busyId.startsWith(chore.id)}
+                  onClick={() => markComplete(chore, "individual")}
+                >
+                  <CheckCircle2 aria-hidden /> {busyId === `${chore.id}-individual` ? "Saving..." : "Completed"}
+                </button>
+                <button
+                  className="secondary-button"
+                  disabled={busyId.startsWith(chore.id)}
+                  onClick={() => markComplete(chore, "together")}
+                >
+                  <CheckCircle2 aria-hidden /> {busyId === `${chore.id}-together` ? "Saving..." : "Completed Together"}
+                </button>
+              </div>
+            </ChoreCard>
+          ))
+        )}
+      </ChoreSection>
 
       <Panel title="Completed this week">
         <CompletionList items={completedThisWeek} />
@@ -1041,11 +1056,23 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatusPill({ label, value, tone }: { label: string; value: number; tone: ChoreType }) {
+function StatusPill({
+  label,
+  value,
+  tone,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  tone: ChoreType;
+  active: boolean;
+  onClick: () => void;
+}) {
   return (
-    <span className={`status-pill ${tone}`}>
+    <button className={`status-pill ${tone} ${active ? "active" : ""}`} onClick={onClick} type="button">
       {label} <strong>{value}</strong>
-    </span>
+    </button>
   );
 }
 
