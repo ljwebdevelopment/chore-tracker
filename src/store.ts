@@ -55,6 +55,7 @@ function readChore(snapshot: QueryDocumentSnapshot<DocumentData>): Chore {
     amount: Number(data.amount ?? 0),
     type: data.type ?? "daily",
     assignedTo: data.assignedTo ?? "both",
+    assignToBothSeparately: Boolean(data.assignToBothSeparately),
     active: Boolean(data.active),
     bonusRepeats: Boolean(data.bonusRepeats),
     disabledFor: data.disabledFor ?? [],
@@ -176,6 +177,7 @@ export async function saveChore(values: ChoreFormValues, choreId?: string) {
   const now = serverTimestamp();
   const payload = {
     ...values,
+    assignedTo: values.assignToBothSeparately ? "both" : values.assignedTo,
     amount: Number(values.amount),
     updatedAt: now,
   };
@@ -197,10 +199,22 @@ export async function deleteChore(choreId: string) {
   await deleteDoc(doc(requireDb(), "chores", choreId));
 }
 
-function completionLockId(chore: Chore, dayId: string, weekId: string) {
+function completionLockBase(chore: Chore, dayId: string, weekId: string) {
   if (chore.type === "daily") return `${chore.id}_${dayId}`;
   if (chore.type === "weekly") return `${chore.id}_${weekId}`;
   return `${chore.id}_bonus`;
+}
+
+function completionLockId(chore: Chore, childId: ChildId, completionMethod: CompletionMethod, dayId: string, weekId: string) {
+  const base = completionLockBase(chore, dayId, weekId);
+  if (chore.assignToBothSeparately && completionMethod === "individual") return `${base}_${childId}`;
+  return base;
+}
+
+function windowCompletionFilters(chore: Chore, dayId: string, weekId: string) {
+  if (chore.type === "daily") return [where("dayId", "==", dayId)];
+  if (chore.type === "weekly") return [where("weekId", "==", weekId)];
+  return [];
 }
 
 export async function completeChore(chore: Chore, childId: ChildId, completionMethod: CompletionMethod) {
@@ -209,16 +223,14 @@ export async function completeChore(chore: Chore, childId: ChildId, completionMe
   const weekId = getWeekId();
   const dayId = getDayId();
   const groupId = doc(collection(database, "completions")).id;
-  const lockId = completionLockId(chore, dayId, weekId);
+  const lockId = completionLockId(chore, childId, completionMethod, dayId, weekId);
+  const isSeparateIndividual = chore.assignToBothSeparately && completionMethod === "individual";
 
   const completionQuery = query(
     collection(database, "completions"),
     where("choreId", "==", chore.id),
-    ...(chore.type === "daily"
-      ? [where("dayId", "==", dayId)]
-      : chore.type === "weekly"
-        ? [where("weekId", "==", weekId)]
-        : []),
+    ...windowCompletionFilters(chore, dayId, weekId),
+    ...(isSeparateIndividual ? [where("childId", "==", childId)] : []),
   );
   const existing = await getDocs(completionQuery);
   if (!existing.empty) {
@@ -229,12 +241,32 @@ export async function completeChore(chore: Chore, childId: ChildId, completionMe
   await runTransaction(database, async (transaction) => {
     const choreRef = doc(database, "chores", chore.id);
     const lockRef = doc(database, "completionLocks", lockId);
+    const globalLockRef = doc(database, "completionLocks", completionLockBase(chore, dayId, weekId));
+    const lukeLockRef = doc(database, "completionLocks", completionLockId(chore, "luke", "individual", dayId, weekId));
+    const jarenLockRef = doc(database, "completionLocks", completionLockId(chore, "jaren", "individual", dayId, weekId));
     const choreSnapshot = await transaction.get(choreRef);
     if (!choreSnapshot.exists()) throw new Error("This chore no longer exists.");
     const lockSnapshot = await transaction.get(lockRef);
     if (lockSnapshot.exists()) {
       const resetWindow = chore.type === "daily" ? "day" : chore.type === "weekly" ? "week" : "round";
       throw new Error(`${chore.title} is already complete for this ${resetWindow}.`);
+    }
+    if (isSeparateIndividual) {
+      const globalLockSnapshot = await transaction.get(globalLockRef);
+      if (globalLockSnapshot.exists()) {
+        const resetWindow = chore.type === "daily" ? "day" : chore.type === "weekly" ? "week" : "round";
+        throw new Error(`${chore.title} is already complete for this ${resetWindow}.`);
+      }
+    }
+    if (chore.assignToBothSeparately && completionMethod === "together") {
+      const [lukeLockSnapshot, jarenLockSnapshot] = await Promise.all([
+        transaction.get(lukeLockRef),
+        transaction.get(jarenLockRef),
+      ]);
+      if (lukeLockSnapshot.exists() || jarenLockSnapshot.exists()) {
+        const resetWindow = chore.type === "daily" ? "day" : chore.type === "weekly" ? "week" : "round";
+        throw new Error(`${chore.title} already has an individual completion for this ${resetWindow}.`);
+      }
     }
 
     const totalAmount = Number(chore.amount);
@@ -254,6 +286,7 @@ export async function completeChore(chore: Chore, childId: ChildId, completionMe
       choreType: chore.type,
       completionMethod,
       completedBy: childId,
+      assignToBothSeparately: chore.assignToBothSeparately,
       dayId,
       weekId,
       createdAt: serverTimestamp(),
@@ -293,9 +326,18 @@ export async function completeChore(chore: Chore, childId: ChildId, completionMe
     });
 
     if (chore.type === "bonus") {
-      const choreData = choreSnapshot.data() as { assignedTo?: Assignment; disabledFor?: ChildId[] };
+      const choreData = choreSnapshot.data() as {
+        assignedTo?: Assignment;
+        assignToBothSeparately?: boolean;
+        disabledFor?: ChildId[];
+      };
       const assignedTo = choreData.assignedTo ?? chore.assignedTo;
-      const assignedChildren = assignedTo === "both" ? (["luke", "jaren"] as ChildId[]) : [assignedTo];
+      const assignedChildren =
+        choreData.assignToBothSeparately && completionMethod === "individual"
+          ? [childId]
+          : assignedTo === "both"
+            ? (["luke", "jaren"] as ChildId[])
+            : [assignedTo];
       const disabledFor = Array.from(new Set([...(choreData.disabledFor ?? []), ...assignedChildren]));
       transaction.update(choreRef, { disabledFor, updatedAt: serverTimestamp() });
     }

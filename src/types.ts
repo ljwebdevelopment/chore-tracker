@@ -19,6 +19,7 @@ export interface Chore {
   amount: number;
   type: ChoreType;
   assignedTo: Assignment;
+  assignToBothSeparately: boolean;
   active: boolean;
   bonusRepeats: boolean;
   disabledFor?: ChildId[];
@@ -83,6 +84,7 @@ export interface ChoreFormValues {
   amount: number;
   type: ChoreType;
   assignedTo: Assignment;
+  assignToBothSeparately: boolean;
   active: boolean;
   bonusRepeats: boolean;
 }

@@ -61,6 +61,7 @@ const blankChore: ChoreFormValues = {
   amount: 1,
   type: "daily",
   assignedTo: "both",
+  assignToBothSeparately: false,
   active: true,
   bonusRepeats: true,
 };
@@ -159,13 +160,25 @@ function isChoreAvailable(chore: Chore, childId: ChildId, completions: Completio
   if (!chore.active || !assignedToChild(chore, childId)) return false;
   if (chore.type === "bonus" && chore.disabledFor?.includes(childId)) return false;
   if (chore.type === "bonus") {
-    return !completions.some((item) => item.choreId === chore.id);
+    return !completions.some(
+      (item) => item.choreId === chore.id && (!chore.assignToBothSeparately || item.childId === childId),
+    );
   }
   if (chore.type === "daily") {
-    return !completions.some((item) => item.choreId === chore.id && item.dayId === getDayId());
+    return !completions.some(
+      (item) =>
+        item.choreId === chore.id &&
+        item.dayId === getDayId() &&
+        (!chore.assignToBothSeparately || item.childId === childId),
+    );
   }
   if (chore.type === "weekly") {
-    return !completions.some((item) => item.choreId === chore.id && item.weekId === getWeekId());
+    return !completions.some(
+      (item) =>
+        item.choreId === chore.id &&
+        item.weekId === getWeekId() &&
+        (!chore.assignToBothSeparately || item.childId === childId),
+    );
   }
   return true;
 }
@@ -176,6 +189,21 @@ function sortChoresByType(chores: Chore[]) {
     if (typeSort !== 0) return typeSort;
     return a.title.localeCompare(b.title);
   });
+}
+
+function completionSlotCount(chore: Chore, completions: Completion[], periodId: string) {
+  const periodCompletions = completions.filter((item) => {
+    const matchesPeriod = chore.type === "daily" ? item.dayId === periodId : item.weekId === periodId;
+    return item.choreId === chore.id && matchesPeriod;
+  });
+  if (chore.assignToBothSeparately) {
+    return new Set(periodCompletions.map((item) => item.childId)).size;
+  }
+  return periodCompletions.length > 0 ? 1 : 0;
+}
+
+function requiredCompletionSlots(chore: Chore) {
+  return chore.assignToBothSeparately ? 2 : 1;
 }
 
 function balancesFrom(transactions: MoneyTransaction[]): Record<ChildId, BalanceSummary> {
@@ -561,6 +589,7 @@ function ChoreForm({ editing, onDone }: { editing: Chore | null; onDone: () => v
           amount: editing.amount,
           type: editing.type,
           assignedTo: editing.assignedTo,
+          assignToBothSeparately: editing.assignToBothSeparately,
           active: editing.active,
           bonusRepeats: editing.bonusRepeats,
         }
@@ -619,7 +648,11 @@ function ChoreForm({ editing, onDone }: { editing: Chore | null; onDone: () => v
         </label>
         <label>
           Assigned to
-          <select value={values.assignedTo} onChange={(event) => setValues({ ...values, assignedTo: event.target.value as ChoreFormValues["assignedTo"] })}>
+          <select
+            value={values.assignedTo}
+            disabled={values.assignToBothSeparately}
+            onChange={(event) => setValues({ ...values, assignedTo: event.target.value as ChoreFormValues["assignedTo"] })}
+          >
             <option value="both">Luke and Jaren</option>
             <option value="luke">Luke</option>
             <option value="jaren">Jaren</option>
@@ -630,6 +663,20 @@ function ChoreForm({ editing, onDone }: { editing: Chore | null; onDone: () => v
         <label>
           <input type="checkbox" checked={values.active} onChange={(event) => setValues({ ...values, active: event.target.checked })} />
           Active
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={values.assignToBothSeparately}
+            onChange={(event) =>
+              setValues({
+                ...values,
+                assignToBothSeparately: event.target.checked,
+                assignedTo: event.target.checked ? "both" : values.assignedTo,
+              })
+            }
+          />
+          Assign to both twins separately
         </label>
       </div>
       <div className="button-row">
@@ -733,10 +780,13 @@ function StatsDashboard({ data, balances }: { data: AppData; balances: Record<Ch
   const weeklyCompletions = data.completions.filter((item) => item.weekId === currentWeek);
   const activeDaily = data.chores.filter((chore) => chore.active && chore.type === "daily");
   const activeWeekly = data.chores.filter((chore) => chore.active && chore.type === "weekly");
-  const totalDailySlots = activeDaily.length;
-  const totalWeeklySlots = activeWeekly.length;
-  const completedDailyToday = data.completions.filter((item) => item.dayId === currentDay && item.choreType === "daily").length;
-  const completedWeekly = weeklyCompletions.filter((item) => item.choreType === "weekly").length;
+  const totalDailySlots = activeDaily.reduce((sum, chore) => sum + requiredCompletionSlots(chore), 0);
+  const totalWeeklySlots = activeWeekly.reduce((sum, chore) => sum + requiredCompletionSlots(chore), 0);
+  const completedDailyToday = activeDaily.reduce(
+    (sum, chore) => sum + completionSlotCount(chore, data.completions, currentDay),
+    0,
+  );
+  const completedWeekly = activeWeekly.reduce((sum, chore) => sum + completionSlotCount(chore, weeklyCompletions, currentWeek), 0);
   const uniqueCompletions = uniqueCompletionGroups(data.completions);
   const mostCompleted = topByCount(uniqueCompletions.map((item) => item.choreTitle));
   const highestEarning = [...uniqueCompletions].sort((a, b) => b.totalAmount - a.totalAmount)[0]?.choreTitle ?? "None yet";
@@ -885,6 +935,7 @@ function ChoreCard({ chore, children }: { chore: Chore; children: React.ReactNod
         <div className="pill-row">
           <span className={`pill ${chore.type}`}>{chore.type}</span>
           <span className="pill muted">{chore.assignedTo === "both" ? "Luke + Jaren" : childName(chore.assignedTo)}</span>
+          {chore.assignToBothSeparately && <span className="pill muted">separate</span>}
           {!chore.active && <span className="pill muted">inactive</span>}
         </div>
       </div>
