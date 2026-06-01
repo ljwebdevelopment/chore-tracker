@@ -4,6 +4,7 @@ export type UserId = "emily" | ChildId;
 export type ChoreType = "daily" | "weekly" | "bonus";
 export type Assignment = ChildId | "both";
 export type TransactionType = "chore" | "payout";
+export type CompletionMethod = "individual" | "together";
 
 export interface AppUser {
   id: UserId;
@@ -27,12 +28,17 @@ export interface Chore {
 
 export interface Completion {
   id: string;
+  groupId: string;
   choreId: string;
   childId: ChildId;
   childName: string;
   choreTitle: string;
   choreType: ChoreType;
   amount: number;
+  completionMethod: CompletionMethod;
+  totalAmount: number;
+  lukeAmount: number;
+  jarenAmount: number;
   completedAt: Date;
   weekId: string;
   dayId: string;

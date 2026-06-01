@@ -44,6 +44,7 @@ import type {
   ChildId,
   Chore,
   ChoreFormValues,
+  CompletionMethod,
   ChoreType,
   Completion,
   MoneyTransaction,
@@ -157,6 +158,9 @@ function assignedToChild(chore: Chore, childId: ChildId) {
 function isChoreAvailable(chore: Chore, childId: ChildId, completions: Completion[]) {
   if (!chore.active || !assignedToChild(chore, childId)) return false;
   if (chore.type === "bonus" && chore.disabledFor?.includes(childId)) return false;
+  if (chore.type === "bonus") {
+    return !completions.some((item) => item.choreId === chore.id);
+  }
   if (chore.type === "daily") {
     return !completions.some((item) => item.choreId === chore.id && item.dayId === getDayId());
   }
@@ -424,12 +428,16 @@ function ChildDashboard({
   const remainingByType = (type: ChoreType) => available.filter((chore) => chore.type === type);
   const completedThisWeek = data.completions.filter((item) => item.childId === childId && item.weekId === getWeekId());
 
-  async function markComplete(chore: Chore) {
-    setBusyId(chore.id);
+  async function markComplete(chore: Chore, completionMethod: CompletionMethod) {
+    setBusyId(`${chore.id}-${completionMethod}`);
     setMessage("");
     try {
-      await completeChore(chore, childId);
-      setMessage(`${chore.title} added to ${childName(childId)}'s balance.`);
+      await completeChore(chore, childId, completionMethod);
+      setMessage(
+        completionMethod === "together"
+          ? `${chore.title} split between Luke and Jaren.`
+          : `${chore.title} added to ${childName(childId)}'s balance.`,
+      );
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Could not complete chore.");
     } finally {
@@ -457,9 +465,22 @@ function ChildDashboard({
             ) : (
               choresByType.map((chore) => (
                 <ChoreCard key={chore.id} chore={chore}>
-                  <button className="primary-button" disabled={busyId === chore.id} onClick={() => markComplete(chore)}>
-                    <CheckCircle2 aria-hidden /> {busyId === chore.id ? "Saving..." : "Complete"}
-                  </button>
+                  <div className="complete-actions">
+                    <button
+                      className="primary-button"
+                      disabled={busyId.startsWith(chore.id)}
+                      onClick={() => markComplete(chore, "individual")}
+                    >
+                      <CheckCircle2 aria-hidden /> {busyId === `${chore.id}-individual` ? "Saving..." : "Completed"}
+                    </button>
+                    <button
+                      className="secondary-button"
+                      disabled={busyId.startsWith(chore.id)}
+                      onClick={() => markComplete(chore, "together")}
+                    >
+                      <CheckCircle2 aria-hidden /> {busyId === `${chore.id}-together` ? "Saving..." : "Completed Together"}
+                    </button>
+                  </div>
                 </ChoreCard>
               ))
             )}
@@ -610,15 +631,6 @@ function ChoreForm({ editing, onDone }: { editing: Chore | null; onDone: () => v
           <input type="checkbox" checked={values.active} onChange={(event) => setValues({ ...values, active: event.target.checked })} />
           Active
         </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={values.bonusRepeats}
-            disabled={values.type !== "bonus"}
-            onChange={(event) => setValues({ ...values, bonusRepeats: event.target.checked })}
-          />
-          Bonus remains available
-        </label>
       </div>
       <div className="button-row">
         <button className="primary-button" disabled={saving}>
@@ -725,8 +737,9 @@ function StatsDashboard({ data, balances }: { data: AppData; balances: Record<Ch
   const totalWeeklySlots = activeWeekly.length;
   const completedDailyToday = data.completions.filter((item) => item.dayId === currentDay && item.choreType === "daily").length;
   const completedWeekly = weeklyCompletions.filter((item) => item.choreType === "weekly").length;
-  const mostCompleted = topByCount(data.completions.map((item) => item.choreTitle));
-  const highestEarning = [...data.completions].sort((a, b) => b.amount - a.amount)[0]?.choreTitle ?? "None yet";
+  const uniqueCompletions = uniqueCompletionGroups(data.completions);
+  const mostCompleted = topByCount(uniqueCompletions.map((item) => item.choreTitle));
+  const highestEarning = [...uniqueCompletions].sort((a, b) => b.totalAmount - a.totalAmount)[0]?.choreTitle ?? "None yet";
 
   return (
     <section className="page-stack">
@@ -873,7 +886,6 @@ function ChoreCard({ chore, children }: { chore: Chore; children: React.ReactNod
           <span className={`pill ${chore.type}`}>{chore.type}</span>
           <span className="pill muted">{chore.assignedTo === "both" ? "Luke + Jaren" : childName(chore.assignedTo)}</span>
           {!chore.active && <span className="pill muted">inactive</span>}
-          {chore.type === "bonus" && <span className="pill bonus">{chore.bonusRepeats ? "repeats" : "one-time"}</span>}
         </div>
       </div>
       {children}
@@ -900,7 +912,12 @@ function CompletionList({ items }: { items: Completion[] }) {
           <span>
             <strong>{item.choreTitle}</strong>
             <small>
-              {item.choreType} / {formatDateTime(item.completedAt)}
+              {item.choreType} / {item.completionMethod === "together" ? "Together" : "Individual"} /{" "}
+              {formatDateTime(item.completedAt)}
+            </small>
+            <small>
+              Total {formatMoney(item.totalAmount)} / Luke {formatMoney(item.lukeAmount)} / Jaren{" "}
+              {formatMoney(item.jarenAmount)}
             </small>
           </span>
           <b>{formatMoney(item.amount)}</b>
@@ -940,7 +957,10 @@ function ActivityList({ transactions, emptyText }: { transactions: MoneyTransact
           {item.amount >= 0 ? <ArrowUpCircle aria-hidden className="earned-icon" /> : <ArrowDownCircle aria-hidden className="paid-icon" />}
           <span>
             <strong>{item.childName}: {item.label}</strong>
-            <small>{formatDateTime(item.createdAt)}</small>
+            <small>
+              {formatDateTime(item.createdAt)}
+              {item.note ? ` / ${item.note}` : ""}
+            </small>
           </span>
           <b>{formatMoney(item.amount)}</b>
         </div>
@@ -992,6 +1012,10 @@ function topByCount(values: string[]) {
     {} as Record<string, number>,
   );
   return Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+}
+
+function uniqueCompletionGroups(items: Completion[]) {
+  return Array.from(new Map(items.map((item) => [item.groupId, item])).values());
 }
 
 function percent(done: number, total: number) {

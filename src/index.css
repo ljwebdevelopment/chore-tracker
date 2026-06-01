@@ -413,12 +413,22 @@ a svg {
 
 .toggle-row,
 .button-row,
+.complete-actions,
 .pill-row,
 .type-tabs {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   align-items: center;
+}
+
+.complete-actions {
+  justify-content: flex-end;
+}
+
+.complete-actions .primary-button,
+.complete-actions .secondary-button {
+  min-width: 160px;
 }
 
 .toggle-row label {
@@ -638,6 +648,12 @@ a svg {
   .chore-card {
     align-items: stretch;
     grid-template-columns: 1fr;
+  }
+
+  .complete-actions,
+  .complete-actions .primary-button,
+  .complete-actions .secondary-button {
+    width: 100%;
   }
 
   .section-heading {
