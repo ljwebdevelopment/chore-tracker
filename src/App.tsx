@@ -64,6 +64,12 @@ const blankChore: ChoreFormValues = {
   bonusRepeats: true,
 };
 
+const CHORE_TYPE_ORDER: Record<ChoreType, number> = {
+  daily: 0,
+  weekly: 1,
+  bonus: 2,
+};
+
 interface AppData {
   users: AppUser[];
   chores: Chore[];
@@ -152,16 +158,20 @@ function isChoreAvailable(chore: Chore, childId: ChildId, completions: Completio
   if (!chore.active || !assignedToChild(chore, childId)) return false;
   if (chore.type === "bonus" && chore.disabledFor?.includes(childId)) return false;
   if (chore.type === "daily") {
-    return !completions.some(
-      (item) => item.choreId === chore.id && item.childId === childId && item.dayId === getDayId(),
-    );
+    return !completions.some((item) => item.choreId === chore.id && item.dayId === getDayId());
   }
   if (chore.type === "weekly") {
-    return !completions.some(
-      (item) => item.choreId === chore.id && item.childId === childId && item.weekId === getWeekId(),
-    );
+    return !completions.some((item) => item.choreId === chore.id && item.weekId === getWeekId());
   }
   return true;
+}
+
+function sortChoresByType(chores: Chore[]) {
+  return [...chores].sort((a, b) => {
+    const typeSort = CHORE_TYPE_ORDER[a.type] - CHORE_TYPE_ORDER[b.type];
+    if (typeSort !== 0) return typeSort;
+    return a.title.localeCompare(b.title);
+  });
 }
 
 function balancesFrom(transactions: MoneyTransaction[]): Record<ChildId, BalanceSummary> {
@@ -410,7 +420,7 @@ function ChildDashboard({
   const [busyId, setBusyId] = useState("");
   const [message, setMessage] = useState("");
   const chores = data.chores.filter((chore) => assignedToChild(chore, childId) && chore.active);
-  const available = chores.filter((chore) => isChoreAvailable(chore, childId, data.completions));
+  const available = sortChoresByType(chores.filter((chore) => isChoreAvailable(chore, childId, data.completions)));
   const remainingByType = (type: ChoreType) => available.filter((chore) => chore.type === type);
   const completedThisWeek = data.completions.filter((item) => item.childId === childId && item.weekId === getWeekId());
 
@@ -438,19 +448,24 @@ function ChildDashboard({
         <StatusPill label="Bonus" value={remainingByType("bonus").length} tone="bonus" />
       </div>
 
-      <ChoreSection title="Available chores">
-        {available.length === 0 ? (
-          <EmptyState text="No chores left right now." />
-        ) : (
-          available.map((chore) => (
-            <ChoreCard key={chore.id} chore={chore}>
-              <button className="primary-button" disabled={busyId === chore.id} onClick={() => markComplete(chore)}>
-                <CheckCircle2 aria-hidden /> {busyId === chore.id ? "Saving..." : "Complete"}
-              </button>
-            </ChoreCard>
-          ))
-        )}
-      </ChoreSection>
+      {(["daily", "weekly", "bonus"] as ChoreType[]).map((type) => {
+        const choresByType = remainingByType(type);
+        return (
+          <ChoreSection title={`${type[0].toUpperCase()}${type.slice(1)} chores`} key={type}>
+            {choresByType.length === 0 ? (
+              <EmptyState text={`No ${type} chores left right now.`} />
+            ) : (
+              choresByType.map((chore) => (
+                <ChoreCard key={chore.id} chore={chore}>
+                  <button className="primary-button" disabled={busyId === chore.id} onClick={() => markComplete(chore)}>
+                    <CheckCircle2 aria-hidden /> {busyId === chore.id ? "Saving..." : "Complete"}
+                  </button>
+                </ChoreCard>
+              ))
+            )}
+          </ChoreSection>
+        );
+      })}
 
       <Panel title="Completed this week">
         <CompletionList items={completedThisWeek} />
@@ -498,7 +513,7 @@ function ChoreManager({ chores }: { chores: Chore[] }) {
         {chores.length === 0 ? (
           <EmptyState text="Create the first chore to get started." />
         ) : (
-          chores.map((chore) => (
+          sortChoresByType(chores).map((chore) => (
             <ChoreCard key={chore.id} chore={chore}>
               <div className="button-row">
                 <button className="secondary-button" onClick={() => setEditing(chore)}>
@@ -706,8 +721,8 @@ function StatsDashboard({ data, balances }: { data: AppData; balances: Record<Ch
   const weeklyCompletions = data.completions.filter((item) => item.weekId === currentWeek);
   const activeDaily = data.chores.filter((chore) => chore.active && chore.type === "daily");
   const activeWeekly = data.chores.filter((chore) => chore.active && chore.type === "weekly");
-  const totalDailySlots = activeDaily.reduce((sum, chore) => sum + (chore.assignedTo === "both" ? 2 : 1), 0);
-  const totalWeeklySlots = activeWeekly.reduce((sum, chore) => sum + (chore.assignedTo === "both" ? 2 : 1), 0);
+  const totalDailySlots = activeDaily.length;
+  const totalWeeklySlots = activeWeekly.length;
   const completedDailyToday = data.completions.filter((item) => item.dayId === currentDay && item.choreType === "daily").length;
   const completedWeekly = weeklyCompletions.filter((item) => item.choreType === "weekly").length;
   const mostCompleted = topByCount(data.completions.map((item) => item.choreTitle));
@@ -747,7 +762,7 @@ function StatsDashboard({ data, balances }: { data: AppData; balances: Record<Ch
               key={child.id}
               label={child.name}
               value={`${data.chores.filter((chore) => isChoreAvailable(chore, child.id, data.completions)).length} remaining`}
-              detail={`${activeDaily.filter((chore) => isChoreAvailable(chore, child.id, data.completions)).length} missed daily`}
+              detail={`${activeDaily.filter((chore) => isChoreAvailable(chore, child.id, data.completions)).length} daily left`}
             />
           ))}
         </Panel>

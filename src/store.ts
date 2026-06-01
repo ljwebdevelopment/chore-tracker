@@ -21,6 +21,7 @@ import { childName, FAMILY_USERS } from "./family";
 import { getDayId, getWeekId } from "./dateUtils";
 import type {
   AppUser,
+  Assignment,
   ChildId,
   Chore,
   ChoreFormValues,
@@ -194,16 +195,20 @@ export async function completeChore(chore: Chore, childId: ChildId) {
   const weekId = getWeekId();
   const dayId = getDayId();
 
-  if (chore.type !== "bonus") {
+  if (chore.type !== "bonus" || !chore.bonusRepeats) {
     const completionQuery = query(
       collection(database, "completions"),
       where("choreId", "==", chore.id),
-      where("childId", "==", childId),
-      ...(chore.type === "daily" ? [where("dayId", "==", dayId)] : [where("weekId", "==", weekId)]),
+      ...(chore.type === "daily"
+        ? [where("dayId", "==", dayId)]
+        : chore.type === "weekly"
+          ? [where("weekId", "==", weekId)]
+          : []),
     );
     const existing = await getDocs(completionQuery);
     if (!existing.empty) {
-      throw new Error(`${chore.title} is already complete for this ${chore.type === "daily" ? "day" : "week"}.`);
+      const resetWindow = chore.type === "daily" ? "day" : chore.type === "weekly" ? "week" : "round";
+      throw new Error(`${chore.title} is already complete for this ${resetWindow}.`);
     }
   }
 
@@ -238,7 +243,10 @@ export async function completeChore(chore: Chore, childId: ChildId) {
     });
 
     if (chore.type === "bonus" && !chore.bonusRepeats) {
-      const disabledFor = Array.from(new Set([...(chore.disabledFor ?? []), childId]));
+      const choreData = choreSnapshot.data() as { assignedTo?: Assignment; disabledFor?: ChildId[] };
+      const assignedTo = choreData.assignedTo ?? chore.assignedTo;
+      const assignedChildren = assignedTo === "both" ? (["luke", "jaren"] as ChildId[]) : [assignedTo];
+      const disabledFor = Array.from(new Set([...(choreData.disabledFor ?? []), ...assignedChildren]));
       transaction.update(choreRef, { disabledFor, updatedAt: serverTimestamp() });
     }
   });
