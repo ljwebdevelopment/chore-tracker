@@ -206,6 +206,13 @@ function requiredCompletionSlots(chore: Chore) {
   return chore.assignToBothSeparately ? 2 : 1;
 }
 
+function parseMoneyInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const amount = Number(trimmed);
+  return Number.isFinite(amount) ? amount : null;
+}
+
 function balancesFrom(transactions: MoneyTransaction[]): Record<ChildId, BalanceSummary> {
   const currentWeek = getWeekId();
   return CHILDREN.reduce(
@@ -610,16 +617,24 @@ function ChoreForm({ editing, onDone }: { editing: Chore | null; onDone: () => v
         }
       : blankChore,
   );
+  const [amountInput, setAmountInput] = useState(() => (editing ? String(editing.amount) : ""));
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const amount = parseMoneyInput(amountInput);
+    if (amount === null || amount < 0) {
+      setMessage("Enter a valid chore price before saving.");
+      return;
+    }
+
     setSaving(true);
     setMessage("");
     try {
-      await saveChore(values, editing?.id);
+      await saveChore({ ...values, amount }, editing?.id);
       setValues(blankChore);
+      setAmountInput("");
       onDone();
       setMessage(editing ? "Chore updated." : "Chore created.");
     } catch (err) {
@@ -648,9 +663,11 @@ function ChoreForm({ editing, onDone }: { editing: Chore | null; onDone: () => v
             type="number"
             min="0"
             step="0.25"
-            value={values.amount}
+            inputMode="decimal"
+            placeholder="0.00"
+            value={amountInput}
             required
-            onChange={(event) => setValues({ ...values, amount: Number(event.target.value) })}
+            onChange={(event) => setAmountInput(event.target.value)}
           />
         </label>
         <label>
@@ -736,21 +753,28 @@ function ChildDetail({ data, balances }: { data: AppData; balances: Record<Child
 
 function PayoutForm() {
   const [childId, setChildId] = useState<ChildId>("luke");
-  const [amount, setAmount] = useState(5);
+  const [amountInput, setAmountInput] = useState("");
   const [note, setNote] = useState("");
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    const amount = parseMoneyInput(amountInput);
+    if (amount === null || amount <= 0) {
+      setMessage("Enter a payout amount greater than $0.");
+      return;
+    }
+
     setSaving(true);
     setMessage("");
     try {
       await recordPayout(childId, amount, note);
+      setAmountInput("");
       setNote("");
       setMessage(`Recorded ${formatMoney(amount)} payout for ${childName(childId)}.`);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Could not record payout.");
+      setMessage(err instanceof Error ? err.message : "Could not record payout. Check the connection and try again.");
     } finally {
       setSaving(false);
     }
@@ -775,7 +799,16 @@ function PayoutForm() {
         </label>
         <label>
           Amount
-          <input type="number" min="0.01" step="0.25" value={amount} onChange={(event) => setAmount(Number(event.target.value))} />
+          <input
+            type="number"
+            min="0.01"
+            step="0.25"
+            inputMode="decimal"
+            placeholder="0.00"
+            required
+            value={amountInput}
+            onChange={(event) => setAmountInput(event.target.value)}
+          />
         </label>
         <label>
           Note

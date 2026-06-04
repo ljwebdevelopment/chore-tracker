@@ -175,10 +175,15 @@ export function subscribeTransactions(
 export async function saveChore(values: ChoreFormValues, choreId?: string) {
   const database = requireDb();
   const now = serverTimestamp();
+  const amount = Number(values.amount);
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error("Enter a valid chore price before saving.");
+  }
+
   const payload = {
     ...values,
     assignedTo: values.assignToBothSeparately ? "both" : values.assignedTo,
-    amount: Number(values.amount),
+    amount,
     updatedAt: now,
   };
 
@@ -346,16 +351,22 @@ export async function completeChore(chore: Chore, childId: ChildId, completionMe
 
 export async function recordPayout(childId: ChildId, amount: number, note: string) {
   const database = requireDb();
+  const payoutAmount = Number(amount);
+  if (!Number.isFinite(payoutAmount) || payoutAmount <= 0) {
+    throw new Error("Enter a payout amount greater than $0.");
+  }
+
   const name = childName(childId);
   const weekId = getWeekId();
+  const trimmedNote = note.trim();
 
   await runTransaction(database, async (transaction) => {
     const payoutRef = doc(collection(database, "payouts"));
     transaction.set(payoutRef, {
       childId,
       childName: name,
-      amount,
-      note,
+      amount: payoutAmount,
+      note: trimmedNote,
       paidAt: serverTimestamp(),
       weekId,
     });
@@ -365,9 +376,9 @@ export async function recordPayout(childId: ChildId, amount: number, note: strin
       childId,
       childName: name,
       type: "payout",
-      amount: -Math.abs(amount),
+      amount: -payoutAmount,
       label: "Money paid out",
-      note,
+      note: trimmedNote,
       sourceId: payoutRef.id,
       createdAt: serverTimestamp(),
       weekId,
